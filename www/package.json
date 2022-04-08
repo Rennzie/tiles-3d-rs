@@ -1,0 +1,20 @@
+{
+  "name": "www",
+  "version": "1.0.0",
+  "main": "index.js",
+  "author": "Sean.Rennie <rnnsea001@gmail.com>",
+  "license": "MIT",
+  "scripts": {
+    "build": "webpack build",
+    "start": "webpack serve"
+  },
+  "devDependencies": {
+    "html-webpack-plugin": "^5.5.0",
+    "webpack": "^5.72.0",
+    "webpack-cli": "^4.9.2",
+    "webpack-dev-server": "^4.8.1"
+  },
+  "dependencies": {
+    "tiles-3d-rs": "../pkg"
+  }
+}

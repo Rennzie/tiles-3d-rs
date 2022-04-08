@@ -1,0 +1,2 @@
+[build]
+target = "wasm32-unknown-unknown" # change to the triple you're working on
