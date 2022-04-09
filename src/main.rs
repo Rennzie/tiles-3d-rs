@@ -1,5 +1,5 @@
-use tutorial1_window::run;
+use tiles_3d_rs::run;
 
 fn main() {
-    run()
+    pollster::block_on(run())
 }
