@@ -1,2 +1,6 @@
 [build]
-target = "wasm32-unknown-unknown" # change to the triple you're working on
+# tells rustAnalyzer that we are using this target which gives better linting and warnings
+target = "wasm32-unknown-unknown" 
+
+# Use like scripts in package.json for anything you do `cargo run` for.
+# [alias]
