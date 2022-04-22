@@ -2,6 +2,8 @@
 use wasm_bindgen::prelude::*;
 
 use log::{self, info};
+use web_sys::HtmlCanvasElement;
+use winit::dpi::PhysicalSize;
 use winit::window::Window;
 use winit::{
     event::*,
@@ -491,24 +493,38 @@ pub async fn run() {
 
     info!("RUST 🦀 SETTING UP EVENT LOOP");
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let mut window = WindowBuilder::new().build(&event_loop).unwrap();
 
     #[cfg(target_arch = "wasm32")]
     {
         // Winit prevents sizing with CSS, so we have to set
         // the size manually when on web.
-        use winit::dpi::PhysicalSize;
-        // !note: this does not handle pixel ratio. On high DPI screen like Mac Retina displays 600px will be 300 on screen.
-        window.set_inner_size(PhysicalSize::new(600, 600));
+        use wasm_bindgen::JsCast;
+        use winit::platform::web::WindowBuilderExtWebSys;
 
-        use winit::platform::web::WindowExtWebSys;
         web_sys::window()
-            .and_then(|win| win.document())
-            .and_then(|doc| {
-                let div = doc.get_element_by_id("tiles-3d-rs")?;
-                let canvas = web_sys::Element::from(window.canvas());
-                div.append_child(&canvas).ok()?;
-                Some(())
+            .map(|win| win.document())
+            .map(|doc| {
+                let canvas = doc
+                    .unwrap()
+                    .get_element_by_id("tiles-3d-rs")
+                    .unwrap()
+                    .dyn_into::<HtmlCanvasElement>()
+                    .expect("DOM element tiles-3d-rs is not a HtmlCanvasElement");
+
+                let web_window = web_sys::window().unwrap();
+                let inner_height = web_window.inner_height().unwrap().as_f64().unwrap();
+                let inner_width = web_window.inner_width().unwrap().as_f64().unwrap();
+                let pixel_ratio = web_window.device_pixel_ratio();
+
+                window = WindowBuilder::new()
+                    .with_canvas(Some(canvas))
+                    .build(&event_loop)
+                    .unwrap();
+                window.set_inner_size(PhysicalSize::new(
+                    inner_width * pixel_ratio,
+                    inner_height * pixel_ratio,
+                ));
             })
             .expect("Couldn't append canvas to tiles-3d-rs document body.");
     }
@@ -534,6 +550,7 @@ pub async fn run() {
                         ..
                     } => *control_flow = ControlFlow::Exit,
                     WindowEvent::Resized(physical_size) => {
+                        info!("size on resize {:?}", physical_size);
                         state.resize(*physical_size);
                     }
                     WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {

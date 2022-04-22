@@ -1,8 +1,11 @@
 import { run } from "tiles-3d-rs";
 console.log("📦 - Webpack started");
-const root = document.createElement("div");
-root.setAttribute("id", "tiles-3d-rs");
-document.body.appendChild(root);
+const canvas = document.createElement("canvas");
+canvas.setAttribute("id", "tiles-3d-rs");
+document.body.appendChild(canvas);
+
+// add a canvas to the screen
+// add
 
 // Initialise the wasm program
 await run();
