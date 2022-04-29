@@ -1,3 +1,4 @@
+use texture::Texture;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -18,55 +19,8 @@ mod model;
 mod resources;
 mod texture;
 
-// use crate::model::ModelVertex;
-// use model::Vertex;
-
-#[repr(C)]
-#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-impl Vertex {
-    // function to describe the buffer layout.
-    // A vertex_attr_array! macro is available to make it less cumbersome
-    // leaving as is for now
-    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x2,
-                },
-            ],
-        }
-    }
-}
-
-#[rustfmt::skip]
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], tex_coords: [0.4131759, 0.00759614], }, // A
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], tex_coords: [0.0048659444, 0.43041354], }, // B
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], tex_coords: [0.28081453, 0.949397], }, // C
-    Vertex { position: [0.35966998, -0.3473291, 0.0], tex_coords: [0.85967, 0.84732914], }, // D
-    Vertex { position: [0.44147372, 0.2347359, 0.0], tex_coords: [0.9414737, 0.2652641], }, // E
-];
-
-#[rustfmt::skip]
-const INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
-];
+use crate::model::{Model, ModelVertex};
+use model::Vertex;
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
@@ -151,7 +105,6 @@ impl CameraController {
     }
 
     fn update_camera(&self, camera: &mut Camera) {
-        use cgmath::InnerSpace;
         let forward = camera.target - camera.eye;
         let forward_norm = forward.normalize();
         let forward_mag = forward.magnitude();
@@ -195,7 +148,6 @@ struct CameraUniform {
 
 impl CameraUniform {
     fn new() -> Self {
-        use cgmath::SquareMatrix;
         Self {
             view_proj: cgmath::Matrix4::identity().into(),
         }
@@ -275,9 +227,7 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
+
     diffuse_bind_group: wgpu::BindGroup,
     #[allow(dead_code)]
     diffuse_texture: texture::Texture,
@@ -288,6 +238,8 @@ struct State {
     camera_controller: CameraController,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
+    depth_texture: Texture,
+    obj_model: Model,
 }
 
 impl State {
@@ -425,7 +377,7 @@ impl State {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: "vs_main",
-                buffers: &[Vertex::desc(), InstanceRaw::desc()],
+                buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -449,8 +401,13 @@ impl State {
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
-            //? is this to do wit depth testing?
-            depth_stencil: None,
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less, // 1.
+                stencil: wgpu::StencilState::default(),     // 2.
+                bias: wgpu::DepthBiasState::default(),
+            }),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -459,22 +416,10 @@ impl State {
             multiview: None,
         });
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(VERTICES),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
         let camera = Camera {
-            // position the camera one unit up and 2 units back
+            // position the camera 10 units up and 20 units back
             // +z is out of the screen
-            eye: (0.0, 1.0, 2.0).into(),
+            eye: (0.0, 10.0, 20.0).into(),
             // have it look at the origin
             target: (0.0, 0.0, 0.0).into(),
             // which way is "up"
@@ -502,31 +447,22 @@ impl State {
             }],
             label: Some("camera_bind_group"),
         });
-        let camera_controller = CameraController::new(0.2);
+        let camera_controller = CameraController::new(0.5);
 
         let clear_color = wgpu::Color::BLACK;
-        let num_indices = INDICES.len() as u32;
 
         // INSTANCING
         const NUM_INSTANCES_PER_ROW: u32 = 10;
-        const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-            NUM_INSTANCES_PER_ROW as f32 * 0.5,
-            0.0,
-            NUM_INSTANCES_PER_ROW as f32 * 0.5,
-        );
-
+        const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
 
                     let rotation = if position.is_zero() {
-                        // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                        // as Quaternions can effect scale if they're not created correctly
                         cgmath::Quaternion::from_axis_angle(
                             cgmath::Vector3::unit_z(),
                             cgmath::Deg(0.0),
@@ -539,6 +475,7 @@ impl State {
                 })
             })
             .collect::<Vec<_>>();
+
         let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
         let instance_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
@@ -546,10 +483,13 @@ impl State {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        // let obj_model =
-        //     resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
-        //         .await
-        //         .unwrap();
+        let depth_texture =
+            texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+
+        let obj_model =
+            resources::load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+                .await
+                .unwrap();
 
         State {
             surface,
@@ -559,9 +499,6 @@ impl State {
             clear_color,
             size,
             render_pipeline,
-            vertex_buffer,
-            index_buffer,
-            num_indices,
             diffuse_bind_group,
             diffuse_texture,
             camera,
@@ -571,6 +508,8 @@ impl State {
             camera_controller,
             instances,
             instance_buffer,
+            depth_texture,
+            obj_model,
         }
     }
 
@@ -583,6 +522,8 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture =
+                texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
         }
     }
 
@@ -616,7 +557,7 @@ impl State {
 
         // block required to return &mut encoder when everything else is dropped\
         // then we can call encoder.finish
-        // Could also to drop(render_pass) we we wanted
+        // Could also to drop(render_pass) if we wanted
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -628,19 +569,27 @@ impl State {
                         store: true,
                     },
                 }],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: true,
+                    }),
+                    stencil_ops: None,
+                }),
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
-            // use model::DrawModel;
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+            use model::DrawModel;
+            render_pass.draw_model_instanced(
+                &self.obj_model,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+            );
         }
 
         // submit will accept anything that implements IntoIter
@@ -689,19 +638,17 @@ pub async fn run() {
                     .dyn_into::<HtmlCanvasElement>()
                     .expect("DOM element tiles-3d-rs is not a HtmlCanvasElement");
 
-                let web_window = web_sys::window().unwrap();
-                let inner_height = web_window.inner_height().unwrap().as_f64().unwrap();
-                let inner_width = web_window.inner_width().unwrap().as_f64().unwrap();
-                let pixel_ratio = web_window.device_pixel_ratio();
+                // let web_window = web_sys::window().unwrap();
+                // ! Using pixel ratio causes depth textures to have widths over 2048px limit
+                // let inner_height = web_window.inner_height().unwrap().as_f64().unwrap();
+                // let inner_width = web_window.inner_width().unwrap().as_f64().unwrap();
+                // let pixel_ratio = web_window.device_pixel_ratio();
 
                 window = WindowBuilder::new()
                     .with_canvas(Some(canvas))
                     .build(&event_loop)
                     .unwrap();
-                window.set_inner_size(PhysicalSize::new(
-                    inner_width * pixel_ratio,
-                    inner_height * pixel_ratio,
-                ));
+                window.set_inner_size(PhysicalSize::new(2000, 2000));
             })
             .expect("Couldn't append canvas to tiles-3d-rs document body.");
     }

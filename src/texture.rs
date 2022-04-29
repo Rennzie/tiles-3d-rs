@@ -16,6 +16,7 @@ impl Texture {
         config: &wgpu::SurfaceConfiguration,
         label: &str,
     ) -> Self {
+        //! On devices with 2x pixel ratio (mac retina) the width here is greater than max allowable of 2048
         let size = wgpu::Extent3d {
             width: config.width,
             height: config.height,
