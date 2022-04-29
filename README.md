@@ -1,6 +1,8 @@
 # Tiles-3D-RS
 A 3D tiles render built with Rust and `wgpu` for the web.
 
+
+At time of writing, this code is all put together by following [Learn Wgpu](https://sotrh.github.io/learn-wgpu)
 ## Pre-requisites
 Install all the things:
 
