@@ -20,7 +20,7 @@ mod resources;
 mod texture;
 
 use crate::model::Model;
-use model::Vertex;
+use model::{DrawLight, DrawModel, Vertex};
 
 #[rustfmt::skip]
 pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
@@ -264,7 +264,7 @@ fn create_render_pipeline(
     let shader = device.create_shader_module(&shader);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("Render Pipeline"),
-        layout: Some(&layout),
+        layout: Some(layout),
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: "vs_main",
@@ -317,9 +317,6 @@ struct State {
     clear_color: wgpu::Color,
     render_pipeline: wgpu::RenderPipeline,
     light_render_pipeline: wgpu::RenderPipeline,
-    diffuse_bind_group: wgpu::BindGroup,
-    #[allow(dead_code)]
-    diffuse_texture: texture::Texture,
     camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
@@ -332,6 +329,7 @@ struct State {
     light_uniform: LightUniform,
     light_buffer: wgpu::Buffer,
     light_bind_group: wgpu::BindGroup,
+    animate_light: bool,
 }
 
 impl State {
@@ -385,11 +383,6 @@ impl State {
         // SURFACE
         surface.configure(&device, &config);
 
-        // TEXTURE
-        let diffuse_bytes = include_bytes!("happy-tree.png"); // CHANGED!
-        let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap(); // CHANGED!
-
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -411,24 +404,26 @@ impl State {
                         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                         count: None,
                     },
+                    // normal map
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 3,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
                 ],
                 label: Some("texture_bind_group_layout"),
             });
-
-        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view), // CHANGED!
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler), // CHANGED!
-                },
-            ],
-            label: Some("diffuse_bind_group"),
-        });
 
         // CAMERA
         let camera_bind_group_layout =
@@ -472,7 +467,7 @@ impl State {
                 push_constant_ranges: &[],
             });
 
-        // PIPELINEs
+        // PIPELINES
         let render_pipeline = {
             let shader = wgpu::ShaderModuleDescriptor {
                 label: Some("Normal Shader"),
@@ -621,8 +616,6 @@ impl State {
             clear_color,
             size,
             render_pipeline,
-            diffuse_bind_group,
-            diffuse_texture,
             camera,
             camera_uniform,
             camera_buffer,
@@ -636,11 +629,12 @@ impl State {
             light_buffer,
             light_uniform,
             light_render_pipeline,
+            animate_light: true,
         }
     }
 
     // impl State
-    // todo: good candidate to due in JS. Tutorial targets desktop but we'd probably handle all this JS side and pass in a canvas
+    // todo: good candidate to do in JS. Tutorial targets desktop but we'd probably handle all this JS side and pass in a canvas
     // Or use this method when the canvas is resized
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
@@ -654,7 +648,29 @@ impl State {
     }
 
     fn input(&mut self, event: &WindowEvent) -> bool {
-        self.camera_controller.process_events(event)
+        let camera_event = self.camera_controller.process_events(event);
+
+        let light_event = match event {
+            WindowEvent::KeyboardInput {
+                input:
+                    KeyboardInput {
+                        state,
+                        virtual_keycode: Some(VirtualKeyCode::L),
+                        ..
+                    },
+                ..
+            } => {
+                let is_key_up = *state == ElementState::Released;
+                if is_key_up {
+                    self.animate_light = !self.animate_light;
+                }
+
+                true
+            }
+            _ => false,
+        };
+
+        camera_event || light_event
     }
 
     fn update(&mut self) {
@@ -667,10 +683,12 @@ impl State {
         );
 
         let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
-        self.light_uniform.position =
-            (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0))
-                * old_position)
-                .into();
+        if self.animate_light {
+            self.light_uniform.position =
+                (cgmath::Quaternion::from_axis_angle((0.0, 1.0, 0.0).into(), cgmath::Deg(1.0))
+                    * old_position)
+                    .into();
+        };
 
         self.queue.write_buffer(
             &self.light_buffer,
@@ -717,19 +735,14 @@ impl State {
                 }),
             });
 
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
-            use model::DrawLight;
             render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model_instanced(
+            render_pass.draw_light_model(
                 &self.obj_model,
-                0..1,
                 &self.camera_bind_group,
                 &self.light_bind_group,
             );
 
-            use model::DrawModel;
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.draw_model_instanced(
                 &self.obj_model,

@@ -1,4 +1,3 @@
-// light.wgsl
 // Vertex shader
 
 struct Camera {
