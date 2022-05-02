@@ -703,15 +703,15 @@ pub async fn run() {
                     .expect("DOM element tiles-3d-rs is not a HtmlCanvasElement");
 
                 let web_window = web_sys::window().unwrap();
-                // ! Using pixel ratio causes depth textures to have widths over 2048px limit
                 let inner_height = web_window.inner_height().unwrap().as_f64().unwrap();
                 let inner_width = web_window.inner_width().unwrap().as_f64().unwrap();
-                let pixel_ratio = web_window.device_pixel_ratio();
-                log::info!("{}, {}, {}", inner_height, inner_width, pixel_ratio);
+
                 window = WindowBuilder::new()
                     .with_canvas(Some(canvas))
                     .build(&event_loop)
                     .unwrap();
+
+                // Use LogicalSize so Retina displays get correctly sized canvas
                 window.set_inner_size(LogicalSize::new(inner_width, inner_height));
             })
             .expect("Couldn't append canvas to tiles-3d-rs document body.");
