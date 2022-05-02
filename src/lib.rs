@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 
 use log::{self, info};
 use web_sys::HtmlCanvasElement;
-use winit::dpi::PhysicalSize;
+use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::window::Window;
 use winit::{
     event::*,
@@ -250,7 +250,12 @@ impl State {
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web we'll have to disable some.
                     limits: if cfg!(target_arch = "wasm32") {
-                        wgpu::Limits::downlevel_webgl2_defaults()
+                        let mut lim = wgpu::Limits::downlevel_webgl2_defaults();
+                        // Up the limits here because Retina displays can easily be greater than default 2048
+                        lim.max_texture_dimension_1d = 4096;
+                        lim.max_texture_dimension_2d = 4096;
+
+                        lim
                     } else {
                         wgpu::Limits::default()
                     },
@@ -697,17 +702,17 @@ pub async fn run() {
                     .dyn_into::<HtmlCanvasElement>()
                     .expect("DOM element tiles-3d-rs is not a HtmlCanvasElement");
 
-                // let web_window = web_sys::window().unwrap();
+                let web_window = web_sys::window().unwrap();
                 // ! Using pixel ratio causes depth textures to have widths over 2048px limit
-                // let inner_height = web_window.inner_height().unwrap().as_f64().unwrap();
-                // let inner_width = web_window.inner_width().unwrap().as_f64().unwrap();
-                // let pixel_ratio = web_window.device_pixel_ratio();
-
+                let inner_height = web_window.inner_height().unwrap().as_f64().unwrap();
+                let inner_width = web_window.inner_width().unwrap().as_f64().unwrap();
+                let pixel_ratio = web_window.device_pixel_ratio();
+                log::info!("{}, {}, {}", inner_height, inner_width, pixel_ratio);
                 window = WindowBuilder::new()
                     .with_canvas(Some(canvas))
                     .build(&event_loop)
                     .unwrap();
-                window.set_inner_size(PhysicalSize::new(2000, 2000));
+                window.set_inner_size(LogicalSize::new(inner_width, inner_height));
             })
             .expect("Couldn't append canvas to tiles-3d-rs document body.");
     }
@@ -743,6 +748,7 @@ pub async fn run() {
                     ..
                 } => *control_flow = ControlFlow::Exit,
                 WindowEvent::Resized(physical_size) => {
+                    log::debug!("RESIZED WINDOWW");
                     state.resize(*physical_size);
                 }
                 WindowEvent::ScaleFactorChanged { new_inner_size, .. } => {
