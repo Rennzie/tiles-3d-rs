@@ -25,6 +25,7 @@ bytemuck = { version = "1.4", features = [ "derive" ] }
 cgmath = "0.18"
 anyhow = "1.0.57"
 tobj = { version = "3.2.1", features = ["async"]}
+instant = "0.1.12"
 
 [dependencies.image]
 version = "0.24.2"

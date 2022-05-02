@@ -1642,6 +1642,7 @@ dependencies = [
  "fs_extra",
  "glob",
  "image",
+ "instant",
  "log",
  "pollster",
  "reqwest",
