@@ -1,10 +1,10 @@
-use texture::Texture;
+use cgmath::prelude::*;
+use log::{self, info};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
-
-use log::{self, info};
 use web_sys::HtmlCanvasElement;
-use winit::dpi::{LogicalSize, PhysicalSize};
+use wgpu::util::DeviceExt;
+use winit::dpi::LogicalSize;
 use winit::window::Window;
 use winit::{
     event::*,
@@ -12,16 +12,13 @@ use winit::{
     window::WindowBuilder,
 };
 
-use cgmath::prelude::*;
-use wgpu::util::DeviceExt;
-
 mod camera;
 mod model;
 mod resources;
 mod texture;
 
-use crate::model::Model;
-use model::{DrawLight, DrawModel, Vertex};
+use model::{DrawLight, DrawModel, Model, Vertex};
+use texture::Texture;
 
 // We need this for Rust to store our data correctly for the shaders
 #[repr(C)]
@@ -168,6 +165,7 @@ fn create_render_pipeline(
         }),
         //? wonder if this is a drawable in wgpu world?
         primitive: wgpu::PrimitiveState {
+            // This sets triangle only. How would you render lines? Create a new pipeline?
             topology: wgpu::PrimitiveTopology::TriangleList, // 1.
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw, // 2.
@@ -617,7 +615,7 @@ impl State {
 
         // block required to return &mut encoder when everything else is dropped\
         // then we can call encoder.finish
-        // Could also to drop(render_pass) if we wanted
+        // Could also to `drop(render_pass)` if we wanted
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Render Pass"),
@@ -641,6 +639,7 @@ impl State {
 
             render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             render_pass.set_pipeline(&self.light_render_pipeline);
+            // This 👇🏻 is a draw call. It uses this 👆🏻 pipeline
             render_pass.draw_light_model(
                 &self.obj_model,
                 &self.camera_bind_group,
@@ -648,6 +647,7 @@ impl State {
             );
 
             render_pass.set_pipeline(&self.render_pipeline);
+            // This 👇🏻 is a draw call. It uses this 👆🏻 pipeline
             render_pass.draw_model_instanced(
                 &self.obj_model,
                 0..self.instances.len() as u32,

@@ -29,7 +29,7 @@ impl Vertex for ModelVertex {
                     shader_location: 0,
                     format: wgpu::VertexFormat::Float32x3,
                 },
-                // indices
+                // tex_coords
                 wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
                     shader_location: 1,
